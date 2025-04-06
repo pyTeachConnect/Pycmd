@@ -1,0 +1,305 @@
+import requests
+import os
+import time
+import json
+import hashlib
+from tqdm import tqdm
+import sys
+os.system('cls')
+
+Path = os.path.dirname(os.path.realpath(__file__))
+print("Copyright ©2025 Wakana_0. All Rights Reserved.")
+
+def get_userpath():
+    return os.environ['USERPROFILE']
+
+def open_explorer(path):
+    os.startfile(path)
+
+# 获取当前用户的“下载”文件夹路径
+def get_download_folder():
+    return os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+config = {
+            "download_folder": get_download_folder()  # 默认存放位置为“下载”文件夹
+        }
+
+# DeepSeek API URL
+url = 'https://api.qster.top/API/v2/DeepSeek'
+
+def check_dsapi_connection():
+    try:
+        print("正在检查连接...")
+        response = requests.post(url, json={"content": "test"})
+        print(f"检查连接响应：{response.status_code}")
+        return True, response.status_code == 200
+    except requests.exceptions.RequestException as e:
+        print("请求异常")
+        return False, None
+    
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
+
+# 配置文件加载
+def load_config():
+    try:
+        with open('DSAPIconfig.json', 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print("配置文件不存在或格式错误，正在重新创建配置文件...")
+        dsconfig = {
+            "content": "",
+            "stream": "false",
+            "use_enhance": "true",
+            "sessionid": "",
+            "character": "你是为人民服务的DeepSeek",
+            "think": "true"
+        }
+        with open('DSAPIconfig.json', 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=4)
+        print("配置文件已重新创建")
+
+    # 确保 download_folder 存在
+    if "download_folder" not in config:
+        config["download_folder"] = get_download_folder()
+
+    return config
+
+# 文件下载并显示进度条
+def download_file(file_url, file_path):
+    try:
+        response = requests.get(file_url, stream=True, timeout=60)  # 设置超时
+        response.raise_for_status()  # 如果响应状态码不是 200，会抛出异常
+
+        # 获取 Content-Length 或使用未知大小
+        total_size = response.headers.get("content-length")
+        if total_size is None:
+            print("警告: 无法获取文件大小，下载可能会比较慢。")
+            total_size = 0  # 设置为 0，下载时不会有进度条，直到下载完成
+        
+        total_size = int(total_size) if total_size else 0
+
+        block_size = 1024  # 每次下载的块大小
+        progress_bar = tqdm(total=total_size, unit="B", unit_scale=True)
+
+        with open(file_path, "wb") as f:
+            for data in response.iter_content(block_size):
+                progress_bar.update(len(data))
+                f.write(data)
+        
+        progress_bar.close()
+        print("文件下载完成")
+        open_explorer(config["download_folder"])  # 打开下载文件夹
+
+    except requests.exceptions.Timeout:
+        print("下载超时，请检查网络连接或稍后重试。")
+    except requests.exceptions.RequestException as e:
+        print(f"请求失败: {e}")
+    except Exception as e:
+        print(f"下载过程中发生错误: {e}")
+
+
+# 检查 API 连接
+def api_check():
+    print('检查联机服务可用......')
+    check = check_dsapi_connection()
+
+    if check[0]:
+        print('联机服务服务可用')
+        time.sleep(1)
+        os.system('cls')
+        print('------------------------------Pycmd------------------------------')
+        return True
+    else:
+        print('无法连接到 DeepSeek API，请检查网络连接')
+        time.sleep(1)
+        os.system('cls')
+        print('------------------------------Pycmd------------------------------')
+        return False
+
+# API 调用并发送消息
+def send_api_message(config, message):
+    config["content"] = message
+    print(f"发送内容: {config['content']}")  # 打印发送内容
+
+    try:
+        response = requests.post(url, json=config)
+        print(f"API 请求返回状态码: {response.status_code}")
+        print(f"原始响应内容: {response.text}")  # 打印原始响应内容
+        
+        if response.status_code == 200:
+            print("消息发送成功")
+            try:
+                api_response = response.json()
+                if api_response is None or 'choices' not in api_response or api_response['choices'][0].get('content') is None:
+                    print("API 响应为空 (null)，没有返回有效数据")
+                else:
+                    print("API响应:", api_response)
+            except json.JSONDecodeError:
+                print("响应无法解析为 JSON:", response.text)
+        else:
+            print(f"消息发送失败，状态码: {response.status_code}")
+    except Exception as e:
+        print("接受消息时发生错误:", e)
+
+# 通用配置更新函数
+def update_config_value(config, key, value):
+    config[key] = value
+    print(f"配置项 {key} 更新为 {value}")
+    with open('DSAPIconfig.json', 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=4)
+
+# 修改下载文件存放位置
+def update_download_folder(config, new_folder):
+    if not os.path.exists(new_folder):
+        print(f"路径 {new_folder} 不存在，请创建该文件夹。")
+        return
+    update_config_value(config, "download_folder", new_folder)
+    print(f"下载文件存放位置已更改为: {new_folder}")
+
+# 获取文件路径
+def get_file_path(config, file_url, custom_path=None):
+    if custom_path:
+        return os.path.join(config["download_folder"], custom_path)
+    return os.path.join(config["download_folder"], os.path.basename(file_url))
+
+def get_hashvalue(hash_type, text):
+    if hash_type == "md5":
+        return hashlib.md5(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha1":  
+        return hashlib.sha1(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha256":  
+        return hashlib.sha256(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha512":  
+        return hashlib.sha512(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha3_256":  
+        return hashlib.sha3_256(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha3_512":  
+        return hashlib.sha3_512(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "blake2b":  
+        return hashlib.blake2b(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "blake2s":  
+        return hashlib.blake2s(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha384":  
+        return hashlib.sha384(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "shake_128": 
+        return hashlib.shake_128(text.encode('utf-8')).hexdigest(16),"自定义类型"
+    elif hash_type == "shake_256": 
+        return hashlib.shake_256(text.encode('utf-8')).hexdigest(16),"自定义类型"
+    elif hash_type == "whirlpool":  
+        return hashlib.whirlpool(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "ripemd160":  
+        return hashlib.ripemd160(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sm3":  
+        return hashlib.sm3(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha3_384":  
+        return hashlib.sha3_384(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha224":  
+        return hashlib.sha224(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "shake_128": 
+        return hashlib.shake_128(text.encode('utf-8')).hexdigest(16),"自定义类型"
+    elif hash_type == "shake_256": 
+        return hashlib.shake_256(text.encode('utf-8')).hexdigest(16),"自定义类型"
+    elif hash_type == "whirlpool":  
+        return hashlib.whirlpool(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "ripemd160":  
+        return hashlib.ripemd160(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha3_384":  
+        return hashlib.sha3_384(text.encode('utf-8')).hexdigest(),"自定义类型"
+    elif hash_type == "sha224":  
+        return hashlib.sha224(text.encode('utf-8')).hexdigest(),"自定义类型"
+    else:
+        return hashlib.sha3_256(hash_type.encode('utf-8')).hexdigest(),"默认类型"
+
+def restart():
+    print("正在重启程序...")
+    os.execv(sys.executable, ['python'] + sys.argv)
+
+def pip(info1,info2):
+    python_exe_path = sys.executable
+    if info1 == "install":
+        os.system(f"{python_exe_path} -m pip install {info2}")
+    elif info1 == "uninstall":
+        os.system(f"{python_exe_path} -m pip uninstall {info2}")
+    elif info1 == "list":
+        os.system(f"{python_exe_path} -m pip list")
+    elif info1 == "show":
+        os.system(f"{python_exe_path} -m pip show {info2}")
+    elif info1 == "search":
+        os.system(f"{python_exe_path} -m pip search {info2}")
+    elif info1 == "freeze":
+        os.system(f"{python_exe_path} -m pip freeze > requirements.txt")
+    elif info1 == "install-r":
+        os.system(f"{python_exe_path} -m pip install -r requirements.txt")
+    elif info1 == "uninstall-r":
+        os.system(f"{python_exe_path} -m pip uninstall -r requirements.txt")
+    elif info1 == "update":
+        os.system(f"{python_exe_path} -m pip install --upgrade {info2}")
+    else:
+        print("参数错误")
+
+def system(info):
+    os.system(info)
+
+
+
+
+
+
+
+
+
+def main():
+    print('初始化中...')
+    dsconfig = load_config()  # 加载配置文件
+
+    print('初始化成功')
+
+    is_connected = api_check()
+
+    while True:
+        ipt = input('>> ')
+        info = ipt.split(" ")
+
+        # 创建命令映射字典
+        commands = {
+    "send": lambda: send_api_message(config, info[1]) if is_connected else print("未连接到 DeepSeek API，请检查网络连接或重新启动该程序。"),
+    "download": lambda: download_file(info[1], get_file_path(config, info[1], info[2] if len(info) >= 3 else None)),
+    "dl": lambda: download_file(info[1], get_file_path(config, info[1], info[2] if len(info) >= 3 else None)),
+    "config": lambda: print(config),
+    "dsconfig": lambda: update_download_folder(config, info[3]) if info[1] == "-set" and info[2] == "download_folder" else print("参数错误"),
+    "clear": lambda: os.system('cls'),
+    "exit": lambda: exit(),
+    "get-hash": lambda: print("hash:", get_hashvalue(info[1], info[2])[0]),
+    "&": lambda: exit(),
+    "restart": lambda: restart(), 
+    "pip": lambda: pip(info[1],info[2]),
+    None: lambda: print("\n"),
+    "help": lambda: print("命令列表:\n"
+                          "send [内容] - 发送内容给 DeepSeek API\n"
+                          "download [文件链接] [保存路径] - 下载大文件并显示进度条\n"
+                          "config - show - 显示当前应用配置\n"
+                          "config -set [参数名] [参数值] - 设置应用配置\n"
+                          "dsconfig - show - 显示当前API配置\n"
+                          "dsconfig -set download_folder [路径] - 设置下载文件夹路径\n"
+                          "clear - 清屏\n"
+                          "exit - 退出程序\n"
+                          "help - 显示帮助信息\n"
+                          "get-hash [类型] [内容] - 获取哈希值\n"
+                          "restart - 重启程序\n"
+                          "pip [命令] [参数] - pip管理工具\n")
+                    }
+
+
+        command = commands.get(info[0], lambda: system(ipt))  # 获取命令函数
+        command()  # 执行相应的命令
+
+if __name__ == "__main__":
+    main()
+    os.system('cls')
+    print("Copyright ©2025 Wakana_0. All Rights Reserved.")
